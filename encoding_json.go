@@ -11,20 +11,21 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"github.com/tealeg/xlsx"
 )
 
 type field struct {
-	ID       int     `json:"id"`
-	Code     string  `json:"code"`
-	Ccy      string  `json:"ccy"`
-	CcyNmRU  string  `json:"ccyNm_RU"`
-	CcyNmUZ  string  `json:"ccyNm_UZ"`
-	CcyNmUZC string  `json:"ccyNm_UZC"`
-	CcyNmEN  string  `json:"ccyNm_EN"`
-	Nominal  string  `json:"nominal"`
-	Rate     string  `json:"rate"`
-	Diff     string  `json:"diff"`
-	Date     string  `json:"Date"`
+	ID       int    `json:"id"`
+	Code     string `json:"code"`
+	Ccy      string `json:"ccy"`
+	CcyNmRU  string `json:"ccyNm_RU"`
+	CcyNmUZ  string `json:"ccyNm_UZ"`
+	CcyNmUZC string `json:"ccyNm_UZC"`
+	CcyNmEN  string `json:"ccyNm_EN"`
+	Nominal  string `json:"nominal"`
+	Rate     string `json:"rate"`
+	Diff     string `json:"diff"`
+	Date     string `json:"Date"`
 }
 
 func main() {
@@ -48,6 +49,11 @@ func main() {
 	defer db.Close()
 
 	err = insertDataIntoSQLTable(db, fields)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = exportToExcel(fields, "currency_rates.xlsx")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -100,4 +106,41 @@ func DoRequest(url string, method string, body interface{}) ([]byte, error) {
 	}
 
 	return respByte, nil
+}
+
+func exportToExcel(data []field, filename string) error {
+	file := xlsx.NewFile()
+	sheet, err := file.AddSheet("Currency Rates")
+	if err != nil {
+		return err
+	}
+
+	// Add header row
+	headerRow := sheet.AddRow()
+	headerRow.AddCell().SetValue("ID")
+	headerRow.AddCell().SetValue("Code")
+	headerRow.AddCell().SetValue("Currency")
+	headerRow.AddCell().SetValue("Nominal")
+	headerRow.AddCell().SetValue("Rate")
+	headerRow.AddCell().SetValue("Date")
+
+	// Add data rows
+	for _, rate := range data {
+		row := sheet.AddRow()
+		row.AddCell().SetValue(rate.ID)
+		row.AddCell().SetValue(rate.Code)
+		row.AddCell().SetValue(rate.Ccy)
+		row.AddCell().SetValue(rate.Nominal)
+		row.AddCell().SetValue(rate.Rate)
+		row.AddCell().SetValue(rate.Date)
+	}
+
+	// Save the file
+	err = file.Save(filename)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Successfully exported to %s\n", filename)
+	return nil
 }
