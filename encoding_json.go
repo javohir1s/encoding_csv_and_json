@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -48,36 +49,50 @@ func main() {
 	}
 	defer db.Close()
 
-	err = insertDataIntoSQLTable(db, fields)
-	if err != nil {
-		log.Fatal(err)
+	var wg sync.WaitGroup
+
+	errCh := make(chan error, len(fields))
+
+	for _, rate := range fields {
+		wg.Add(1)
+		go func(rate field) {
+			defer wg.Done()
+
+			date, err := time.Parse("02.01.2006", rate.Date)
+			if err != nil {
+				errCh <- err
+				return
+			}
+
+			_, err = db.Exec(`
+				INSERT INTO json (
+					id, code, ccy, ccyNm_RU, ccyNm_UZ, ccyNm_UZC, ccyNm_EN, nominal, rate, diff, Date
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+				rate.ID, rate.Code, rate.Ccy, rate.CcyNmRU, rate.CcyNmUZ, rate.CcyNmUZC, rate.CcyNmEN, rate.Nominal, rate.Rate, rate.Diff, date)
+			if err != nil {
+				errCh <- err
+				return
+			}
+		}(rate)
+	}
+
+	go func() {
+		wg.Wait()
+		close(errCh)
+	}()
+
+	for err := range errCh {
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	err = exportToExcel(fields, "currency_rates.xlsx")
 	if err != nil {
 		log.Fatal(err)
 	}
-}
 
-func insertDataIntoSQLTable(db *sql.DB, data []field) error {
-	for _, rate := range data {
-		date, err := time.Parse("02.01.2006", rate.Date)
-		if err != nil {
-			return err
-		}
-
-		_, err = db.Exec(`
-			INSERT INTO json (
-				id, code, ccy, ccyNm_RU, ccyNm_UZ, ccyNm_UZC, ccyNm_EN, nominal, rate, diff, Date
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-			rate.ID, rate.Code, rate.Ccy, rate.CcyNmRU, rate.CcyNmUZ, rate.CcyNmUZC, rate.CcyNmEN, rate.Nominal, rate.Rate, rate.Diff, date)
-		if err != nil {
-			return err
-		}
-	}
-
-	fmt.Println("successfully insert to sql")
-	return nil
+	fmt.Println("All data processing completed.")
 }
 
 func DoRequest(url string, method string, body interface{}) ([]byte, error) {
@@ -110,33 +125,38 @@ func DoRequest(url string, method string, body interface{}) ([]byte, error) {
 
 func exportToExcel(data []field, filename string) error {
 	file := xlsx.NewFile()
-	sheet, err := file.AddSheet("Currency Rates")
-	if err != nil {
-		return err
-	}
+	dataMap := make(map[string][]field)
 
-	// Add header row
-	headerRow := sheet.AddRow()
-	headerRow.AddCell().SetValue("ID")
-	headerRow.AddCell().SetValue("Code")
-	headerRow.AddCell().SetValue("Currency")
-	headerRow.AddCell().SetValue("Nominal")
-	headerRow.AddCell().SetValue("Rate")
-	headerRow.AddCell().SetValue("Date")
-
-	// Add data rows
 	for _, rate := range data {
-		row := sheet.AddRow()
-		row.AddCell().SetValue(rate.ID)
-		row.AddCell().SetValue(rate.Code)
-		row.AddCell().SetValue(rate.Ccy)
-		row.AddCell().SetValue(rate.Nominal)
-		row.AddCell().SetValue(rate.Rate)
-		row.AddCell().SetValue(rate.Date)
+		dataMap[rate.Date] = append(dataMap[rate.Date], rate)
 	}
 
-	// Save the file
-	err = file.Save(filename)
+	for date, rates := range dataMap {
+		sheet, err := file.AddSheet(date)
+		if err != nil {
+			return err
+		}
+
+		headerRow := sheet.AddRow()
+		headerRow.AddCell().SetValue("ID")
+		headerRow.AddCell().SetValue("Code")
+		headerRow.AddCell().SetValue("Currency")
+		headerRow.AddCell().SetValue("Nominal")
+		headerRow.AddCell().SetValue("Rate")
+		headerRow.AddCell().SetValue("Date")
+
+		for _, rate := range rates {
+			row := sheet.AddRow()
+			row.AddCell().SetValue(rate.ID)
+			row.AddCell().SetValue(rate.Code)
+			row.AddCell().SetValue(rate.Ccy)
+			row.AddCell().SetValue(rate.Nominal)
+			row.AddCell().SetValue(rate.Rate)
+			row.AddCell().SetValue(rate.Date)
+		}
+	}
+
+	err := file.Save(filename)
 	if err != nil {
 		return err
 	}
