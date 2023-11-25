@@ -87,12 +87,12 @@ func main() {
 		}
 	}
 
-	err = exportToExcel(fields, "currency_rates.xlsx")
+	err = exportToExcel(fields, "rates.xlsx")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println("All data processing completed.")
+	fmt.Println("All data inserted ")
 }
 
 func DoRequest(url string, method string, body interface{}) ([]byte, error) {
